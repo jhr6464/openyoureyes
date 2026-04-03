@@ -89,32 +89,25 @@
         let toggleTimestamps = [];
 
         function onResults(results) {
-    if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-        const landmarks = results.multiHandLandmarks[0];
-        const isHandOpen = landmarks[8].y < landmarks[6].y;
-        const currentState = isHandOpen ? 'open' : 'closed';
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                // 검지 끝이 마디보다 높으면(y가 작으면) open
+                const isHandOpen = landmarks[8].y < landmarks[6].y;
+                const currentState = isHandOpen ? 'open' : 'closed';
 
-        if (lastHandState !== currentState) {
-            const activeVideo = isHandOpen ? vOpen : vClosed;
-            const inactiveVideo = isHandOpen ? vClosed : vOpen;
+                // [핵심] 손 상태가 바뀌었을 때만 영상 초기화 및 재생
+                if (lastHandState !== currentState) {
+                    const activeVideo = isHandOpen ? vOpen : vClosed;
+                    const inactiveVideo = isHandOpen ? vClosed : vOpen;
 
-            // 1. 현재 재생할 영상의 위치를 0으로 맞추고 재생 시작
-            activeVideo.currentTime = 0;
-            activeVideo.play().then(() => {
-                // 2. 재생이 확실히 시작된 직후에 클래스를 교체해서 화면에 표시
-                activeVideo.classList.add('active');
-                inactiveVideo.classList.remove('active');
-                
-                // 3. 이전 영상은 0.1초 뒤에 멈춰서 끊김 현상 방지
-                setTimeout(() => {
-                    if (lastHandState === currentState) { // 상태가 다시 바뀌지 않았을 때만 멈춤
-                        inactiveVideo.pause();
-                    }
-                }, 100);
-            });
+                    // 이전 상태 영상은 숨기고 현재 영상은 처음부터 재생
+                    inactiveVideo.style.display = 'none';
+                    activeVideo.style.display = 'block';
+                    activeVideo.currentTime = 0; 
+                    activeVideo.play();
 
-            toggleTimestamps.push(Date.now());
-            lastHandState = currentState;
+                    toggleTimestamps.push(Date.now());
+                    lastHandState = currentState;
                 }
 
                 // 속도 계산 로직 (빠르게 접고 펴면 영상도 빨라짐)
