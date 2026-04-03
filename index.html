@@ -78,64 +78,75 @@
     <div id="graphic-overlay"></div>
     <video id="input_video"></video>
 
-    <script>
-        const vOpen = document.getElementById('v-open');
-        const vClosed = document.getElementById('v-closed');
-        const inputVideo = document.getElementById('input_video');
-        const clickLayer = document.getElementById('click-layer');
-        const graphicOverlay = document.getElementById('graphic-overlay');
-        
-        let lastHandState = null; // 'open' 혹은 'closed' 저장
-        let toggleTimestamps = [];
+   <script>
+    const vOpen = document.getElementById('v-open');
+    const vClosed = document.getElementById('v-closed');
+    const inputVideo = document.getElementById('input_video');
+    const clickLayer = document.getElementById('click-layer');
+    const graphicOverlay = document.getElementById('graphic-overlay');
+    
+    let lastHandState = null; 
+    let toggleTimestamps = [];
 
-        function onResults(results) {
-            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                const landmarks = results.multiHandLandmarks[0];
-                // 검지 끝이 마디보다 높으면(y가 작으면) open
-                const isHandOpen = landmarks[8].y < landmarks[6].y;
-                const currentState = isHandOpen ? 'open' : 'closed';
+    // [추가] 영상이 끊기지 않도록 미리 로드 설정
+    vOpen.preload = "auto";
+    vClosed.preload = "auto";
 
-                // [핵심] 손 상태가 바뀌었을 때만 영상 초기화 및 재생
-                if (lastHandState !== currentState) {
-                    const activeVideo = isHandOpen ? vOpen : vClosed;
-                    const inactiveVideo = isHandOpen ? vClosed : vOpen;
+    function onResults(results) {
+        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+            const landmarks = results.multiHandLandmarks[0];
+            const isHandOpen = landmarks[8].y < landmarks[6].y;
+            const currentState = isHandOpen ? 'open' : 'closed';
 
-                    // 이전 상태 영상은 숨기고 현재 영상은 처음부터 재생
-                    inactiveVideo.style.display = 'none';
-                    activeVideo.style.display = 'block';
-                    activeVideo.currentTime = 0; 
-                    activeVideo.play();
+            if (lastHandState !== currentState) {
+                const activeVideo = isHandOpen ? vOpen : vClosed;
+                const inactiveVideo = isHandOpen ? vClosed : vOpen;
 
-                    toggleTimestamps.push(Date.now());
-                    lastHandState = currentState;
-                }
+                // 1. 이전 영상은 멈추고 숨기기 (깜빡임 방지)
+                inactiveVideo.pause();
+                inactiveVideo.style.display = 'none';
 
-                // 속도 계산 로직 (빠르게 접고 펴면 영상도 빨라짐)
-                const now = Date.now();
-                toggleTimestamps = toggleTimestamps.filter(t => now - t < 2000);
-                let speed = 1.0 + (toggleTimestamps.length * 0.3);
-                if (speed > 5.0) speed = 5.0;
+                // 2. 현재 영상 보여주고 재생
+                activeVideo.style.display = 'block';
+                activeVideo.currentTime = 0; 
+                
+                // 3. play()가 비동기로 작동하므로 에러 방지 처리
+                activeVideo.play().catch(e => console.log("재생 지연 방지"));
 
-                vOpen.playbackRate = speed;
-                vClosed.playbackRate = speed;
+                toggleTimestamps.push(Date.now());
+                lastHandState = currentState;
             }
+
+            const now = Date.now();
+            toggleTimestamps = toggleTimestamps.filter(t => now - t < 2000);
+            let speed = 1.0 + (toggleTimestamps.length * 0.3);
+            if (speed > 5.0) speed = 5.0;
+
+            vOpen.playbackRate = speed;
+            vClosed.playbackRate = speed;
         }
+    }
 
-        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
-        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5 });
-        hands.onResults(onResults);
+    const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5 });
+    hands.onResults(onResults);
 
-        const camera = new Camera(inputVideo, {
-            onFrame: async () => { await hands.send({image: inputVideo}); },
-            width: 640, height: 480
-        });
+    const camera = new Camera(inputVideo, {
+        onFrame: async () => { await hands.send({image: inputVideo}); },
+        width: 640, height: 480
+    });
 
-        clickLayer.addEventListener('click', () => {
-            clickLayer.style.display = 'none';
-            inputVideo.style.display = 'block';
-            graphicOverlay.style.display = 'block';
-            camera.start();
-        });
-    </script>
+    clickLayer.addEventListener('click', () => {
+        clickLayer.style.display = 'none';
+        inputVideo.style.display = 'block';
+        graphicOverlay.style.display = 'block';
+        
+        // [팁] 클릭하는 순간 두 영상을 아주 잠깐 play했다가 pause해서 메모리에 올립니다 (깜빡임 제거 필살기)
+        vOpen.play().then(() => vOpen.pause());
+        vClosed.play().then(() => vClosed.pause());
+        
+        camera.start();
+    });
+</script>
 </body>
 </html>
