@@ -1,127 +1,142 @@
 <!DOCTYPE html>
 <html lang="ko">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hand Gesture Video Control</title>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Doll - Logic Refined</title>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils"></script>
+    <style>
+        * { margin: 0; padding: 0; overflow: hidden; }
+        body { background-color: #000; width: 100vw; height: 100vh; }
 
-    <style>
-        body { margin: 0; display: flex; justify-content: center; align-items: center; height: 100vh; background-color: #000; }
-        
-        #project-container {
-            position: relative;
-            width: 800px;
-            height: 600px;
-            overflow: hidden;
-            background: #111;
-        }
+        /* 배경 인형 영상 */
+        #doll-container {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            z-index: 1;
+        }
 
-        /* 메인 영상: start.jpg를 포스터로 설정 */
-        #main-video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-        }
+        video.doll-video {
+            position: absolute;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            object-fit: cover;
+            display: none;
+        }
 
-        /* 영상 위에 올라가는 text.png 이미지 */
-        #text-overlay {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            z-index: 10;
-            pointer-events: none; /* 이미지가 마우스 클릭을 방해하지 않도록 설정 */
-            object-fit: contain;
-        }
+        /* 그래픽 오버레이 (text.png) */
+        #graphic-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100vw; height: 100vh;
+            background-image: url('text.png');
+            background-size: contain;
+            background-position: center;
+            background-repeat: no-repeat;
+            z-index: 5;
+            pointer-events: none;
+            display: none;
+        }
 
-        /* 인식용 웹캠 (화면에는 보이지 않게 숨김) */
-        #input-webcam {
-            display: none;
-        }
-    </style>
+        /* 우측 하단 캠 화면 */
+        #input_video {
+            position: fixed;
+            bottom: 30px; right: 30px;
+            width: 220px;
+            border-radius: 12px;
+            border: 1.5px solid rgba(255, 255, 255, 0.2);
+            transform: scaleX(-1);
+            z-index: 10;
+            background: #111;
+            display: none;
+        }
+
+        /* 시작 대기 화면 (start.jpg) */
+        #click-layer {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background-image: url('start.jpg');
+            background-size: cover;
+            background-position: center;
+            z-index: 999;
+            cursor: pointer;
+        }
+    </style>
 </head>
 <body>
 
-<div id="project-container">
-    <video id="main-video" poster="start.jpg">
-        <source src="your-video.mp4" type="video/mp4">
-    </video>
+    <div id="click-layer"></div>
 
-    <img src="text.png" id="text-overlay" alt="Overlay Text">
+    <div id="doll-container">
+        <video id="v-open" class="doll-video" src="open.mp4" muted playsinline></video>
+        <video id="v-closed" class="doll-video" src="closed.mp4" muted playsinline></video>
+    </div>
 
-    <video id="input-webcam"></video>
-</div>
+    <div id="graphic-overlay"></div>
+    <video id="input_video"></video>
 
-<script>
-    const videoElement = document.getElementById('input-webcam');
-    const mainVideo = document.getElementById('main-video');
+    <script>
+        const vOpen = document.getElementById('v-open');
+        const vClosed = document.getElementById('v-closed');
+        const inputVideo = document.getElementById('input_video');
+        const clickLayer = document.getElementById('click-layer');
+        const graphicOverlay = document.getElementById('graphic-overlay');
+        
+        let lastHandState = null; // 'open' 혹은 'closed' 저장
+        let toggleTimestamps = [];
 
-    function onResults(results) {
-        if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-            const landmarks = results.multiHandLandmarks[0];
+        function onResults(results) {
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                const landmarks = results.multiHandLandmarks[0];
+                // 검지 끝이 마디보다 높으면(y가 작으면) open
+                const isHandOpen = landmarks[8].y < landmarks[6].y;
+                const currentState = isHandOpen ? 'open' : 'closed';
 
-            // 손가락 개폐 여부 판단 (Y축 좌표 값이 작을수록 화면 위쪽임을 이용)
-            // 검지(8), 중지(12), 약지(16), 소지(20) 끝마디가 각각의 중간 마디(6, 10, 14, 18)보다 위에 있는지 확인
-            const isOpen = 
-                landmarks[8].y < landmarks[6].y && 
-                landmarks[12].y < landmarks[10].y &&
-                landmarks[16].y < landmarks[14].y &&
-                landmarks[20].y < landmarks[18].y;
+                // [핵심] 손 상태가 바뀌었을 때만 영상 초기화 및 재생
+                if (lastHandState !== currentState) {
+                    const activeVideo = isHandOpen ? vOpen : vClosed;
+                    const inactiveVideo = isHandOpen ? vClosed : vOpen;
 
-            if (isOpen) {
-                // 손을 펴고 있을 때 -> 영상 재생
-                if (mainVideo.paused) {
-                    mainVideo.play().catch(e => console.log("재생 오류:", e));
-                }
-            } else {
-                // 손을 접고 있거나 주먹 상태 -> 마지막 프레임에서 멈춤 (일시정지)
-                if (!mainVideo.paused) {
-                    mainVideo.pause();
-                }
-            }
-        } else {
-            // 손이 감지되지 않을 때도 멈추게 하려면 여기에 pause() 추가 가능
-            if (!mainVideo.paused) {
-                mainVideo.pause();
-            }
-        }
-    }
+                    // 이전 상태 영상은 숨기고 현재 영상은 처음부터 재생
+                    inactiveVideo.style.display = 'none';
+                    activeVideo.style.display = 'block';
+                    activeVideo.currentTime = 0; 
+                    activeVideo.play();
 
-    // MediaPipe Hands 설정
-    const hands = new Hands({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
-    });
+                    toggleTimestamps.push(Date.now());
+                    lastHandState = currentState;
+                }
 
-    hands.setOptions({
-        maxNumHands: 1,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.7
-    });
+                // 속도 계산 로직 (빠르게 접고 펴면 영상도 빨라짐)
+                const now = Date.now();
+                toggleTimestamps = toggleTimestamps.filter(t => now - t < 2000);
+                let speed = 1.0 + (toggleTimestamps.length * 0.3);
+                if (speed > 5.0) speed = 5.0;
 
-    hands.onResults(onResults);
+                vOpen.playbackRate = speed;
+                vClosed.playbackRate = speed;
+            }
+        }
 
-    // 카메라 실행 로직
-    const camera = new Camera(videoElement, {
-        onFrame: async () => {
-            await hands.send({image: videoElement});
-        },
-        width: 640,
-        height: 480
-    });
+        const hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}` });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5 });
+        hands.onResults(onResults);
 
-    camera.start();
+        const camera = new Camera(inputVideo, {
+            onFrame: async () => { await hands.send({image: inputVideo}); },
+            width: 640, height: 480
+        });
 
-    // 브라우저 정책상 첫 재생은 사용자 인터랙션이 필요할 수 있으므로 
-    // 화면을 한 번 클릭하면 카메라와 인터랙션이 활성화되도록 유도하는 것이 좋습니다.
-    window.addEventListener('click', () => {
-        console.log("인터랙션 활성화");
-    }, { once: true });
-
-</script>
-
+        clickLayer.addEventListener('click', () => {
+            clickLayer.style.display = 'none';
+            inputVideo.style.display = 'block';
+            graphicOverlay.style.display = 'block';
+            camera.start();
+        });
+    </script>
 </body>
 </html>
+ 
